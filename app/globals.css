@@ -1,0 +1,43 @@
+:root {
+  color-scheme: light;
+  --page-bg: #f3f0ea;
+  --page-surface: rgba(255, 255, 255, 0.82);
+  --page-surface-strong: #ffffff;
+  --page-border: rgba(26, 32, 44, 0.12);
+  --page-text: #142033;
+  --page-muted: #5f6b7a;
+  --accent: #215e9e;
+  --accent-strong: #123a63;
+  --shadow: 0 24px 60px rgba(18, 58, 99, 0.14);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100%;
+  background:
+    radial-gradient(circle at top left, rgba(33, 94, 158, 0.16), transparent 32%),
+    radial-gradient(circle at top right, rgba(163, 196, 235, 0.28), transparent 28%),
+    linear-gradient(180deg, #fbf9f5 0%, #f3f0ea 100%);
+  color: var(--page-text);
+  font-family: Arial, Helvetica, sans-serif;
+}
+
+body {
+  min-height: 100vh;
+}
+
+a {
+  color: inherit;
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
