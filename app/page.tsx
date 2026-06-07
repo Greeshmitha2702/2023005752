@@ -1,345 +1,472 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, startTransition } from 'react';
 import type { ChangeEvent, FormEvent } from 'react';
-import { Alert, Box, Button, Chip, Container, Paper, Stack, TextField, Typography } from '@mui/material';
-import { Log, getLoggingConfig, registerForTest } from '../logging_middleware/client';
-import type { LogLevel, LogPackage, LogStack, RegistrationPayload } from '../logging_middleware/types';
+import {
+  Alert,
+  Box,
+  Button,
+  Chip,
+  Container,
+  Divider,
+  Paper,
+  Skeleton,
+  Stack,
+  TextField,
+  Typography
+} from '@mui/material';
+import { authenticateForTest, Log, getLoggingConfig } from '../logging_middleware/client';
+import type { LogLevel, LogPackage, LogStack, LoggingOptions } from '../logging_middleware/types';
 
-type LogFormState = {
-  stack: LogStack;
-  level: LogLevel;
-  packageName: LogPackage;
-  message: string;
+type NotificationType = 'Event' | 'Result' | 'Placement';
+
+type NotificationItem = {
+  ID: string;
+  Type: NotificationType;
+  Message: string;
+  Timestamp: string;
 };
 
-type LogResultState = {
-  logID: string;
-  message: string;
+type NotificationApiResponse = {
+  notifications: NotificationItem[];
 };
 
-type RegistrationFormState = RegistrationPayload & {
-  clientID: string;
-  clientSecret: string;
+type LoadState = {
+  loading: boolean;
+  error: string;
 };
 
-const seededConfig = getLoggingConfig();
-
-const initialRegistration: RegistrationFormState = {
-  email: seededConfig.email,
-  name: seededConfig.name,
-  mobileNo: seededConfig.mobileNo,
-  githubUsername: seededConfig.githubUsername,
-  rollNo: seededConfig.rollNo,
-  accessCode: seededConfig.accessCode,
-  clientID: seededConfig.clientID,
-  clientSecret: seededConfig.clientSecret
+type ViewFilters = {
+  limit: number;
+  page: number;
+  notificationType: 'all' | NotificationType;
 };
 
-const initialLogForm: LogFormState = {
-  stack: 'frontend',
-  level: 'info',
-  packageName: 'component',
-  message: 'Login form rendered successfully.'
+const baseUrl = process.env.NEXT_PUBLIC_TEST_SERVER_URL || 'http://4.224.186.213';
+
+const typeOrder: Record<NotificationType, number> = {
+  Placement: 3,
+  Result: 2,
+  Event: 1
 };
+
+const typeColors: Record<NotificationType, string> = {
+  Placement: '#0f766e',
+  Result: '#1d4ed8',
+  Event: '#b45309'
+};
+
+const initialFilters: ViewFilters = {
+  limit: 10,
+  page: 1,
+  notificationType: 'all'
+};
+
+function getPriorityScore(notification: NotificationItem): number {
+  const timestampValue = Date.parse(notification.Timestamp) || 0;
+  return typeOrder[notification.Type] * 1_000_000_000_000 + timestampValue;
+}
+
+function sortNotifications(items: NotificationItem[]): NotificationItem[] {
+  return [...items].sort((left, right) => getPriorityScore(right) - getPriorityScore(left));
+}
+
+function formatTime(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+
+  return new Intl.DateTimeFormat('en-IN', {
+    dateStyle: 'medium',
+    timeStyle: 'short'
+  }).format(date);
+}
+
+async function fetchNotifications(filters: ViewFilters, accessToken: string) {
+  const params = new URLSearchParams();
+
+  params.set('limit', String(filters.limit));
+  params.set('page', String(filters.page));
+
+  if (filters.notificationType !== 'all') {
+    params.set('notification_type', filters.notificationType);
+  }
+
+  const response = await fetch(`${baseUrl}/evaluation-service/notifications?${params.toString()}`, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`
+    }
+  });
+
+  const data = (await response.json()) as NotificationApiResponse | { message?: string };
+
+  if (!response.ok) {
+    throw new Error(
+      typeof data === 'object' && data && 'message' in data && data.message ? data.message : `status ${response.status}`
+    );
+  }
+
+  return Array.isArray((data as NotificationApiResponse).notifications) ? (data as NotificationApiResponse).notifications : [];
+}
 
 export default function Home() {
-  const [registration, setRegistration] = useState<RegistrationFormState>(initialRegistration);
-  const [logForm, setLogForm] = useState<LogFormState>(initialLogForm);
-  const [logResult, setLogResult] = useState<LogResultState | null>(null);
-  const [status, setStatus] = useState(initialRegistration.clientID ? 'Credentials loaded. You can send a log request now.' : 'Ready to register or send a log request.');
-  const [severity, setSeverity] = useState<'success' | 'info' | 'warning' | 'error'>('info');
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [filters, setFilters] = useState<ViewFilters>(initialFilters);
+  const [items, setItems] = useState<NotificationItem[]>([]);
+  const [viewedIds, setViewedIds] = useState<string[]>([]);
+  const [state, setState] = useState<LoadState>({ loading: true, error: '' });
+  const [summary, setSummary] = useState('Loading notifications...');
+  const [accessToken, setAccessToken] = useState('');
 
-  const canRegister = useMemo(
-    () => Boolean(registration.email && registration.name && registration.rollNo && registration.accessCode),
-    [registration.accessCode, registration.email, registration.name, registration.rollNo]
-  );
+  const visibleItems = useMemo(() => {
+    const filtered = filters.notificationType === 'all' ? items : items.filter((item) => item.Type === filters.notificationType);
+    return sortNotifications(filtered).slice(0, filters.limit);
+  }, [filters.limit, filters.notificationType, items]);
 
-  const canLog = useMemo(() => Boolean(logForm.message.trim()), [logForm.message]);
+  const unreadCount = useMemo(() => visibleItems.filter((item) => !viewedIds.includes(item.ID)).length, [viewedIds, visibleItems]);
 
-  const updateRegistrationField = (field: keyof RegistrationFormState) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setRegistration((current) => ({
-      ...current,
-      [field]: event.target.value
-    }));
-  };
+  const priorityPreview = useMemo(() => visibleItems.slice(0, Math.min(5, visibleItems.length)), [visibleItems]);
 
-  const updateLogField = (field: keyof LogFormState) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-    setLogForm((current) => ({
-      ...current,
-      [field]: event.target.value
-    }));
-  };
+  const updateFilter = (field: keyof ViewFilters) => (event: ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+    const value = event.target.value;
 
-  const handleRegister = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!canRegister) {
-      setSeverity('error');
-      setStatus('Fill the registration fields first.');
-      return;
-    }
-
-    setIsSubmitting(true);
-      setLogResult(null);
-      setStatus('Registration succeeded. Copy the returned client credentials into the form or env file.');
-    setStatus('Registering with the test server...');
-
-    try {
-      const result = await registerForTest({
-        email: registration.email,
-        name: registration.name,
-        mobileNo: registration.mobileNo,
-        githubUsername: registration.githubUsername,
-        rollNo: registration.rollNo,
-        accessCode: registration.accessCode
-      });
-
-      setRegistration((current) => ({
+    startTransition(() => {
+      setFilters((current) => ({
         ...current,
-        clientID: String(result.clientID || ''),
-        clientSecret: String(result.clientSecret || '')
-      }));
-      setSeverity('success');
-      setStatus('Registration succeeded. Copy the returned client credentials into the form or env file.');
+        [field]: field === 'limit' || field === 'page' ? Number(value) : value
+      } as ViewFilters));
+    });
+  };
+
+  const saveViewed = (notificationID: string) => {
+    setViewedIds((current) => (current.includes(notificationID) ? current : [...current, notificationID]));
+  };
+
+  const loadNotifications = async (activeFilters: ViewFilters, token: string) => {
+    setState({ loading: true, error: '' });
+    setSummary('Fetching notifications...');
+
+    try {
+      const responseItems = await fetchNotifications(activeFilters, token);
+
+      setItems(responseItems);
+      setState({ loading: false, error: '' });
+      setSummary(`Loaded ${responseItems.length} notifications.`);
+
+      const loggerConfig = getLoggingConfig({ accessToken: '', clientID: '', clientSecret: '' });
+      await Log(
+        'frontend',
+        'info',
+        'page',
+        `Loaded ${responseItems.length} notifications for page ${activeFilters.page} with limit ${activeFilters.limit}`,
+        getLoggingConfig({ accessToken: '' })
+      );
     } catch (error) {
-      setSeverity('error');
-      setStatus(error instanceof Error ? error.message : 'Registration failed.');
-    } finally {
-      setIsSubmitting(false);
+      const message = error instanceof Error ? error.message : 'Unable to load notifications.';
+      setState({ loading: false, error: message });
+      setSummary('Failed to load notifications.');
+
+      try {
+        await Log('frontend', 'error', 'page', message, getLoggingConfig({ accessToken: '' }));
+      } catch {
+        // Ignore logging failures so the UI still renders the API error.
+      }
     }
   };
 
-  const handleLog = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
+  useEffect(() => {
+    let cancelled = false;
 
-    if (!canLog) {
-      setSeverity('error');
-      setStatus('Message is required before sending a log.');
+    const run = async () => {
+      try {
+        const token = await authenticateForTest({ accessToken: '' });
+        if (cancelled) {
+          return;
+        }
+        setAccessToken(token);
+        await loadNotifications(filters, token);
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : 'Unable to authenticate.';
+        setState({ loading: false, error: message });
+        setSummary('Authentication failed.');
+      }
+    };
+
+    void run();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [filters.limit, filters.notificationType, filters.page]);
+
+  const handleRefresh = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!accessToken) {
       return;
     }
 
-    setIsSubmitting(true);
-    setSeverity('info');
-    setStatus('Submitting log request...');
-
-    try {
-      const result = await Log(logForm.stack, logForm.level, logForm.packageName, logForm.message, {
-        email: registration.email,
-        name: registration.name,
-        mobileNo: registration.mobileNo,
-        githubUsername: registration.githubUsername,
-        rollNo: registration.rollNo,
-        accessCode: registration.accessCode,
-        clientID: registration.clientID,
-        clientSecret: registration.clientSecret
-      });
-
-      setSeverity('success');
-      setLogResult({
-        logID: String(result.logID || ''),
-        message: String(result.message || 'log created successfully')
-      });
-      setStatus(result.message || 'Log sent successfully.');
-    } catch (error) {
-      setSeverity('error');
-      setLogResult(null);
-      setStatus(error instanceof Error ? error.message : 'Unable to send log.');
-    } finally {
-      setIsSubmitting(false);
-    }
+    void loadNotifications(filters, accessToken);
   };
 
   return (
-    <Container maxWidth="md" sx={{ py: { xs: 4, md: 8 } }}>
-      <Box sx={{ display: 'grid', gap: 3, mb: 4 }}>
-        <Chip
-          label="Reusable logging middleware"
-          sx={{
-            alignSelf: 'start',
-            bgcolor: 'rgba(33, 94, 158, 0.12)',
-            color: 'primary.main',
-            fontWeight: 700,
-            letterSpacing: 0.6
-          }}
-        />
-        <Box>
-          <Typography variant="h2" component="h1" sx={{ fontWeight: 800, lineHeight: 1.05, mb: 2 }}>
-            Campus Hiring Evaluation - Pre-Test Setup
-          </Typography>
-          <Typography variant="body1" sx={{ color: 'text.secondary', maxWidth: 760, fontSize: '1.05rem' }}>
-            This TypeScript frontend contains a reusable client for test registration, authentication, and protected
-            log submission. Register once, keep the returned client credentials, then reuse the same helper for logs.
-          </Typography>
-        </Box>
-      </Box>
-
+    <Container maxWidth="lg" sx={{ py: { xs: 3, md: 6 } }}>
       <Stack spacing={3}>
-        <Paper
-          elevation={0}
+        <Box
           sx={{
+            display: 'grid',
+            gap: 2,
             p: { xs: 3, md: 4 },
+            borderRadius: 5,
             border: '1px solid rgba(26, 32, 44, 0.12)',
-            boxShadow: '0 24px 60px rgba(18, 58, 99, 0.14)',
-            backdropFilter: 'blur(12px)',
-            backgroundColor: 'rgba(255, 255, 255, 0.84)'
+            background: 'linear-gradient(135deg, rgba(255,255,255,0.96), rgba(240,246,255,0.95))',
+            boxShadow: '0 24px 60px rgba(18, 58, 99, 0.14)'
           }}
         >
-          <Stack spacing={3} component="form" onSubmit={handleRegister}>
-            <Typography variant="h5" component="h2" sx={{ fontWeight: 700 }}>
-              1. Register with the test server
+          <Chip
+            label="Campus Notifications Microservice"
+            sx={{
+              alignSelf: 'start',
+              bgcolor: 'rgba(33, 94, 158, 0.12)',
+              color: 'primary.main',
+              fontWeight: 700,
+              letterSpacing: 0.6
+            }}
+          />
+          <Box>
+            <Typography variant="h2" component="h1" sx={{ fontWeight: 800, lineHeight: 1.05, mb: 1 }}>
+              Priority Inbox
             </Typography>
-            <Stack spacing={2}>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField fullWidth label="Email" value={registration.email} onChange={updateRegistrationField('email')} />
-                <TextField fullWidth label="Name" value={registration.name} onChange={updateRegistrationField('name')} />
-              </Stack>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField fullWidth label="Mobile No" value={registration.mobileNo} onChange={updateRegistrationField('mobileNo')} />
-                <TextField fullWidth label="GitHub Username" value={registration.githubUsername} onChange={updateRegistrationField('githubUsername')} />
-              </Stack>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField fullWidth label="Roll No" value={registration.rollNo} onChange={updateRegistrationField('rollNo')} />
-                <TextField fullWidth label="Access Code" value={registration.accessCode} onChange={updateRegistrationField('accessCode')} />
-              </Stack>
-              <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-                <TextField fullWidth label="Client ID" value={registration.clientID} onChange={updateRegistrationField('clientID')} />
-                <TextField fullWidth label="Client Secret" value={registration.clientSecret} onChange={updateRegistrationField('clientSecret')} />
-              </Stack>
-            </Stack>
-
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
-              <Button type="submit" variant="contained" size="large" disabled={!canRegister || isSubmitting}>
-                Register
-              </Button>
-              <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                If you already registered in Postman, paste the returned client credentials here and skip this step.
+            <Typography variant="body1" sx={{ color: 'text.secondary', maxWidth: 900, fontSize: '1.05rem' }}>
+              Real-time notification board built with Next.js, TypeScript, Material UI, and vanilla CSS. The inbox
+              sorts by type priority, then by recency, and logs each API fetch through the reusable middleware.
+            </Typography>
+          </Box>
+          <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <Paper sx={{ p: 2.5, flex: 1, borderRadius: 4, backgroundColor: 'rgba(15, 118, 110, 0.08)' }} elevation={0}>
+              <Typography variant="overline" sx={{ color: '#0f766e', fontWeight: 700 }}>
+                Visible Notifications
               </Typography>
-            </Stack>
+              <Typography variant="h4" sx={{ fontWeight: 800 }}>
+                {visibleItems.length}
+              </Typography>
+            </Paper>
+            <Paper sx={{ p: 2.5, flex: 1, borderRadius: 4, backgroundColor: 'rgba(29, 78, 216, 0.08)' }} elevation={0}>
+              <Typography variant="overline" sx={{ color: '#1d4ed8', fontWeight: 700 }}>
+                Unread in View
+              </Typography>
+              <Typography variant="h4" sx={{ fontWeight: 800 }}>
+                {unreadCount}
+              </Typography>
+            </Paper>
+            <Paper sx={{ p: 2.5, flex: 1, borderRadius: 4, backgroundColor: 'rgba(180, 83, 9, 0.08)' }} elevation={0}>
+              <Typography variant="overline" sx={{ color: '#b45309', fontWeight: 700 }}>
+                Status
+              </Typography>
+              <Typography variant="body1" sx={{ fontWeight: 700 }}>
+                {summary}
+              </Typography>
+            </Paper>
           </Stack>
-        </Paper>
+        </Box>
 
         <Paper
+          component="form"
+          onSubmit={handleRefresh}
           elevation={0}
           sx={{
             p: { xs: 3, md: 4 },
+            borderRadius: 5,
             border: '1px solid rgba(26, 32, 44, 0.12)',
-            boxShadow: '0 24px 60px rgba(18, 58, 99, 0.14)',
-            backdropFilter: 'blur(12px)',
-            backgroundColor: 'rgba(255, 255, 255, 0.84)'
+            backgroundColor: 'rgba(255, 255, 255, 0.9)'
           }}
         >
-          <Stack spacing={3} component="form" onSubmit={handleLog}>
-            <Typography variant="h5" component="h2" sx={{ fontWeight: 700 }}>
-              2. Send a reusable log request
+          <Stack spacing={2.5}>
+            <Typography variant="h5" sx={{ fontWeight: 700 }}>
+              Filters
             </Typography>
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+            <Stack direction={{ xs: 'column', md: 'row' }} spacing={2}>
               <TextField
                 select
                 fullWidth
-                label="Stack"
-                value={logForm.stack}
-                onChange={updateLogField('stack')}
+                label="Notification Type"
+                value={filters.notificationType}
+                onChange={updateFilter('notificationType')}
                 SelectProps={{ native: true }}
               >
-                <option value="frontend">frontend</option>
-                <option value="backend">backend</option>
-              </TextField>
-              <TextField
-                select
-                fullWidth
-                label="Level"
-                value={logForm.level}
-                onChange={updateLogField('level')}
-                SelectProps={{ native: true }}
-              >
-                <option value="debug">debug</option>
-                <option value="info">info</option>
-                <option value="warn">warn</option>
-                <option value="error">error</option>
-                <option value="fatal">fatal</option>
-              </TextField>
-            </Stack>
-
-            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
-              <TextField
-                select
-                fullWidth
-                label="Package"
-                value={logForm.packageName}
-                onChange={updateLogField('packageName')}
-                SelectProps={{ native: true }}
-              >
-                <optgroup label="Frontend">
-                  <option value="api">api</option>
-                  <option value="component">component</option>
-                  <option value="hook">hook</option>
-                  <option value="page">page</option>
-                  <option value="state">state</option>
-                  <option value="style">style</option>
-                  <option value="auth">auth</option>
-                  <option value="config">config</option>
-                  <option value="middleware">middleware</option>
-                  <option value="utils">utils</option>
-                </optgroup>
-                <optgroup label="Backend">
-                  <option value="cache">cache</option>
-                  <option value="controller">controller</option>
-                  <option value="cron_job">cron_job</option>
-                  <option value="db">db</option>
-                  <option value="domain">domain</option>
-                  <option value="handler">handler</option>
-                  <option value="repository">repository</option>
-                  <option value="route">route</option>
-                  <option value="service">service</option>
-                  <option value="middleware">middleware</option>
-                  <option value="utils">utils</option>
-                </optgroup>
+                <option value="all">All</option>
+                <option value="Event">Event</option>
+                <option value="Result">Result</option>
+                <option value="Placement">Placement</option>
               </TextField>
               <TextField
                 fullWidth
-                label="Message"
-                value={logForm.message}
-                onChange={updateLogField('message')}
-                placeholder="Describe the event you want to log"
+                type="number"
+                label="Limit"
+                value={filters.limit}
+                onChange={updateFilter('limit')}
+                inputProps={{ min: 1, max: 50 }}
+              />
+              <TextField
+                fullWidth
+                type="number"
+                label="Page"
+                value={filters.page}
+                onChange={updateFilter('page')}
+                inputProps={{ min: 1, max: 999 }}
               />
             </Stack>
-
             <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2} alignItems="center">
-              <Button type="submit" variant="contained" size="large" disabled={!canLog || isSubmitting}>
-                Send Log
+              <Button type="submit" variant="contained" size="large" disabled={state.loading}>
+                Refresh Inbox
               </Button>
               <Typography variant="body2" sx={{ color: 'text.secondary' }}>
-                The helper authenticates using the registered credentials, then submits the log.
+                The app will re-fetch and re-log whenever you change the filters.
               </Typography>
             </Stack>
           </Stack>
         </Paper>
 
-        <Alert severity={severity} variant="outlined">
-          {status}
-        </Alert>
+        {state.error && <Alert severity="error">{state.error}</Alert>}
 
-        {logResult && (
+        <Stack direction={{ xs: 'column', lg: 'row' }} spacing={3}>
           <Paper
             elevation={0}
             sx={{
-              p: 3,
+              flex: 1.1,
+              p: { xs: 3, md: 4 },
+              borderRadius: 5,
               border: '1px solid rgba(26, 32, 44, 0.12)',
-              backgroundColor: 'rgba(255, 255, 255, 0.84)'
+              backgroundColor: 'rgba(255, 255, 255, 0.9)'
             }}
           >
-            <Typography variant="h6" sx={{ fontWeight: 700, mb: 1 }}>
-              Last Log Response
-            </Typography>
-            <Typography variant="body2" sx={{ mb: 0.5 }}>
-              <strong>logID:</strong> {logResult.logID || 'N/A'}
-            </Typography>
-            <Typography variant="body2">
-              <strong>message:</strong> {logResult.message}
-            </Typography>
+            <Stack spacing={2.5}>
+              <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                Priority Inbox
+              </Typography>
+              <Divider />
+              {state.loading ? (
+                <Stack spacing={2}>
+                  <Skeleton variant="rounded" height={72} />
+                  <Skeleton variant="rounded" height={72} />
+                  <Skeleton variant="rounded" height={72} />
+                </Stack>
+              ) : visibleItems.length === 0 ? (
+                <Alert severity="info">No notifications found for the selected filters.</Alert>
+              ) : (
+                <Stack spacing={2}>
+                  {visibleItems.map((notification) => {
+                    const isUnread = !viewedIds.includes(notification.ID);
+
+                    return (
+                      <Paper
+                        key={notification.ID}
+                        elevation={0}
+                        onClick={() => saveViewed(notification.ID)}
+                        sx={{
+                          p: 2.25,
+                          borderRadius: 4,
+                          cursor: 'pointer',
+                          border: `1px solid ${isUnread ? 'rgba(33, 94, 158, 0.22)' : 'rgba(26, 32, 44, 0.12)'}`,
+                          backgroundColor: isUnread ? 'rgba(33, 94, 158, 0.05)' : 'rgba(255, 255, 255, 0.9)',
+                          transition: 'transform 0.18s ease, box-shadow 0.18s ease',
+                          '&:hover': {
+                            transform: 'translateY(-2px)',
+                            boxShadow: '0 16px 30px rgba(18, 58, 99, 0.12)'
+                          }
+                        }}
+                      >
+                        <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5} alignItems="flex-start">
+                          <Chip
+                            label={notification.Type}
+                            size="small"
+                            sx={{
+                              backgroundColor: `${typeColors[notification.Type]}14`,
+                              color: typeColors[notification.Type],
+                              fontWeight: 700
+                            }}
+                          />
+                          <Box sx={{ flex: 1 }}>
+                            <Typography variant="subtitle1" sx={{ fontWeight: 700, mb: 0.5 }}>
+                              {notification.Message}
+                            </Typography>
+                            <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                              {formatTime(notification.Timestamp)}
+                            </Typography>
+                          </Box>
+                          <Chip
+                            label={isUnread ? 'Unread' : 'Viewed'}
+                            size="small"
+                            variant={isUnread ? 'filled' : 'outlined'}
+                            sx={{ fontWeight: 700 }}
+                          />
+                        </Stack>
+                      </Paper>
+                    );
+                  })}
+                </Stack>
+              )}
+            </Stack>
           </Paper>
-        )}
+
+          <Paper
+            elevation={0}
+            sx={{
+              width: { xs: '100%', lg: 360 },
+              p: { xs: 3, md: 4 },
+              borderRadius: 5,
+              border: '1px solid rgba(26, 32, 44, 0.12)',
+              backgroundColor: 'rgba(255, 255, 255, 0.9)'
+            }}
+          >
+            <Stack spacing={2.5}>
+              <Typography variant="h5" sx={{ fontWeight: 700 }}>
+                Priority Preview
+              </Typography>
+              <Divider />
+              {priorityPreview.length === 0 ? (
+                <Typography variant="body2" sx={{ color: 'text.secondary' }}>
+                  No items to preview yet.
+                </Typography>
+              ) : (
+                <Stack spacing={2}>
+                  {priorityPreview.map((notification, index) => (
+                    <Paper
+                      key={`${notification.ID}-${index}`}
+                      elevation={0}
+                      sx={{
+                        p: 2,
+                        borderRadius: 4,
+                        backgroundColor: 'rgba(243, 240, 234, 0.6)',
+                        border: '1px solid rgba(26, 32, 44, 0.08)'
+                      }}
+                    >
+                      <Stack direction="row" justifyContent="space-between" alignItems="center" spacing={1}>
+                        <Chip
+                          size="small"
+                          label={notification.Type}
+                          sx={{
+                            backgroundColor: `${typeColors[notification.Type]}14`,
+                            color: typeColors[notification.Type],
+                            fontWeight: 700
+                          }}
+                        />
+                        <Typography variant="caption" sx={{ color: 'text.secondary' }}>
+                          #{index + 1}
+                        </Typography>
+                      </Stack>
+                      <Typography variant="body2" sx={{ mt: 1.25, fontWeight: 600 }}>
+                        {notification.Message}
+                      </Typography>
+                    </Paper>
+                  ))}
+                </Stack>
+              )}
+            </Stack>
+          </Paper>
+        </Stack>
       </Stack>
     </Container>
   );

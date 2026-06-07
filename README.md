@@ -1,6 +1,6 @@
-# Campus Hiring Evaluation Frontend
+# Campus Notifications Microservice
 
-This repository contains a minimal TypeScript Next.js frontend with a reusable logging client that posts to the test server.
+This repository contains a TypeScript Next.js priority inbox for the campus notifications assignment.
 
 ## Setup
 
@@ -17,10 +17,10 @@ This repository contains a minimal TypeScript Next.js frontend with a reusable l
    - `NEXT_PUBLIC_TEST_CLIENT_SECRET`
 3. Start the app with `npm run dev`.
 
-## Logging Client
+## App Flow
 
-The reusable client lives in [logging_middleware/client.ts](logging_middleware/client.ts) and exposes `registerForTest`, `authenticateForTest`, and `Log(stack, level, packageName, message)`.
+The app loads notifications from `http://4.224.186.213/evaluation-service/notifications`, sorts them by priority and time, and shows the top entries in a Material UI inbox.
 
-If you want the direct axios-style API from your snippet, use [logging_middleware/logger.ts](logging_middleware/logger.ts), which exports a default `Log` function.
+The reusable middleware still lives in [logging_middleware/client.ts](logging_middleware/client.ts) and [logging_middleware/logger.ts](logging_middleware/logger.ts), and it is used to log notification fetch success or failure.
 
-It can register your test account, authenticate with the returned client credentials, and then send the protected log payload. If you already have a bearer token, set `NEXT_PUBLIC_TEST_ACCESS_TOKEN` in `.env.local` and the helper will use it directly.
+If you want to run the logger from the terminal, use [scripts/log-terminal.mjs](scripts/log-terminal.mjs).

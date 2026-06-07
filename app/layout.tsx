@@ -3,8 +3,8 @@ import './globals.css';
 import Providers from './providers';
 
 export const metadata = {
-  title: 'Campus Hiring Evaluation',
-  description: 'Reusable logging middleware system for the pre-test setup.'
+  title: 'Campus Notifications Microservice',
+  description: 'Priority inbox built with Next.js, TypeScript, Material UI, and vanilla CSS.'
 };
 
 export default function RootLayout({ children }: { children: ReactNode }) {

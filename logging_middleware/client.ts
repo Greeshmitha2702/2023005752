@@ -18,16 +18,16 @@ const tokenCache = new Map<string, string>();
 
 export function getLoggingConfig(overrides: LoggingOptions = {}): LoggingConfig {
   return {
-    baseUrl: overrides.baseUrl || process.env.NEXT_PUBLIC_TEST_SERVER_URL || DEFAULT_BASE_URL,
-    email: overrides.email || process.env.NEXT_PUBLIC_TEST_EMAIL || '',
-    name: overrides.name || process.env.NEXT_PUBLIC_TEST_NAME || '',
-    mobileNo: overrides.mobileNo || process.env.NEXT_PUBLIC_TEST_MOBILE_NO || '',
-    githubUsername: overrides.githubUsername || process.env.NEXT_PUBLIC_TEST_GITHUB_USERNAME || '',
-    rollNo: overrides.rollNo || process.env.NEXT_PUBLIC_TEST_ROLL_NO || '',
-    accessCode: overrides.accessCode || process.env.NEXT_PUBLIC_TEST_ACCESS_CODE || '',
-    clientID: overrides.clientID || process.env.NEXT_PUBLIC_TEST_CLIENT_ID || '',
-    clientSecret: overrides.clientSecret || process.env.NEXT_PUBLIC_TEST_CLIENT_SECRET || '',
-    accessToken: overrides.accessToken || process.env.NEXT_PUBLIC_TEST_ACCESS_TOKEN || ''
+    baseUrl: overrides.baseUrl ?? process.env.NEXT_PUBLIC_TEST_SERVER_URL ?? DEFAULT_BASE_URL,
+    email: overrides.email ?? process.env.NEXT_PUBLIC_TEST_EMAIL ?? '',
+    name: overrides.name ?? process.env.NEXT_PUBLIC_TEST_NAME ?? '',
+    mobileNo: overrides.mobileNo ?? process.env.NEXT_PUBLIC_TEST_MOBILE_NO ?? '',
+    githubUsername: overrides.githubUsername ?? process.env.NEXT_PUBLIC_TEST_GITHUB_USERNAME ?? '',
+    rollNo: overrides.rollNo ?? process.env.NEXT_PUBLIC_TEST_ROLL_NO ?? '',
+    accessCode: overrides.accessCode ?? process.env.NEXT_PUBLIC_TEST_ACCESS_CODE ?? '',
+    clientID: overrides.clientID ?? process.env.NEXT_PUBLIC_TEST_CLIENT_ID ?? '',
+    clientSecret: overrides.clientSecret ?? process.env.NEXT_PUBLIC_TEST_CLIENT_SECRET ?? '',
+    accessToken: overrides.accessToken ?? process.env.NEXT_PUBLIC_TEST_ACCESS_TOKEN ?? ''
   };
 }
 
