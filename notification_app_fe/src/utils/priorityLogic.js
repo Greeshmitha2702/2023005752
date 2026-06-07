@@ -1,16 +1,16 @@
-// JavaScript companion for running the Stage 1 demo without TypeScript tooling
-const TYPE_WEIGHTS = {
+// JavaScript companion (ESM) for running the Stage 1 demo without TypeScript tooling
+export const TYPE_WEIGHTS = {
   Placement: 3,
   Result: 2,
   Event: 1
 };
 
-function parseTimestamp(ts) {
+export function parseTimestamp(ts) {
   const v = Date.parse(ts);
   return Number.isNaN(v) ? 0 : v;
 }
 
-function getTopNotificationsSorted(items, n) {
+export function getTopNotificationsSorted(items, n) {
   const scored = items.map((it) => ({ score: TYPE_WEIGHTS[it.Type] * 1_000_000_000_000 + parseTimestamp(it.Timestamp), item: it }));
   scored.sort((a, b) => b.score - a.score);
   return scored.slice(0, n).map((s) => s.item);
@@ -72,7 +72,7 @@ class MinHeap {
   }
 }
 
-function getTopNotificationsStream(items, n) {
+export function getTopNotificationsStream(items, n) {
   if (n <= 0) return [];
   const heap = new MinHeap((a, b) => a.score - b.score);
   for (const it of items) {
@@ -88,4 +88,5 @@ function getTopNotificationsStream(items, n) {
   return out.reverse().map((s) => s.item);
 }
 
-module.exports = { getTopNotificationsSorted, getTopNotificationsStream };
+// default export for ESM consumers
+export default getTopNotificationsStream;

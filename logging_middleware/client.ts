@@ -17,17 +17,20 @@ const DEFAULT_BASE_URL = 'http://4.224.186.213';
 const tokenCache = new Map<string, string>();
 
 export function getLoggingConfig(overrides: LoggingOptions = {}): LoggingConfig {
+  // Safely access process.env only when running in Node.js (avoid ReferenceError in browser)
+  const nodeEnv: { [k: string]: any } = typeof process !== 'undefined' && typeof process.env !== 'undefined' ? process.env : {};
+
   return {
-    baseUrl: overrides.baseUrl ?? process.env.NEXT_PUBLIC_TEST_SERVER_URL ?? DEFAULT_BASE_URL,
-    email: overrides.email ?? process.env.NEXT_PUBLIC_TEST_EMAIL ?? '',
-    name: overrides.name ?? process.env.NEXT_PUBLIC_TEST_NAME ?? '',
-    mobileNo: overrides.mobileNo ?? process.env.NEXT_PUBLIC_TEST_MOBILE_NO ?? '',
-    githubUsername: overrides.githubUsername ?? process.env.NEXT_PUBLIC_TEST_GITHUB_USERNAME ?? '',
-    rollNo: overrides.rollNo ?? process.env.NEXT_PUBLIC_TEST_ROLL_NO ?? '',
-    accessCode: overrides.accessCode ?? process.env.NEXT_PUBLIC_TEST_ACCESS_CODE ?? '',
-    clientID: overrides.clientID ?? process.env.NEXT_PUBLIC_TEST_CLIENT_ID ?? '',
-    clientSecret: overrides.clientSecret ?? process.env.NEXT_PUBLIC_TEST_CLIENT_SECRET ?? '',
-    accessToken: overrides.accessToken ?? process.env.NEXT_PUBLIC_TEST_ACCESS_TOKEN ?? ''
+    baseUrl: overrides.baseUrl ?? nodeEnv.NEXT_PUBLIC_TEST_SERVER_URL ?? DEFAULT_BASE_URL,
+    email: overrides.email ?? nodeEnv.NEXT_PUBLIC_TEST_EMAIL ?? '',
+    name: overrides.name ?? nodeEnv.NEXT_PUBLIC_TEST_NAME ?? '',
+    mobileNo: overrides.mobileNo ?? nodeEnv.NEXT_PUBLIC_TEST_MOBILE_NO ?? '',
+    githubUsername: overrides.githubUsername ?? nodeEnv.NEXT_PUBLIC_TEST_GITHUB_USERNAME ?? '',
+    rollNo: overrides.rollNo ?? nodeEnv.NEXT_PUBLIC_TEST_ROLL_NO ?? '',
+    accessCode: overrides.accessCode ?? nodeEnv.NEXT_PUBLIC_TEST_ACCESS_CODE ?? '',
+    clientID: overrides.clientID ?? nodeEnv.NEXT_PUBLIC_TEST_CLIENT_ID ?? '',
+    clientSecret: overrides.clientSecret ?? nodeEnv.NEXT_PUBLIC_TEST_CLIENT_SECRET ?? '',
+    accessToken: overrides.accessToken ?? nodeEnv.NEXT_PUBLIC_TEST_ACCESS_TOKEN ?? ''
   };
 }
 
